@@ -15,9 +15,13 @@ const sizeMapping: { [key: number]: string } = {
   3: "большой",
 };
 
+const getSizeLabel = (size: number | null) => {
+  return size !== null && sizeMapping[size] ? sizeMapping[size] : "Неизвестный размер";
+};
+
 interface ProductItem {
   id: number;
-  size: number; // Размер теперь число
+  size: number | null;  // Размер теперь число
   price: number;
 }
 
@@ -187,7 +191,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
                   onClick={() => setSelectedSize(item.id)}
                 >
                   {/* Отображаем текстовое описание размера */}
-                  {sizeMapping[item.size]}
+                  {getSizeLabel(item.size)}
                 </button>
               ))}
             </div>

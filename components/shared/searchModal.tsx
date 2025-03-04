@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { XIcon } from "lucide-react";
 import ProductModal from "./ProductModal";
 import { useCart } from "./CartContext";
+import { ProductItem } from "@prisma/client";
 
 interface Product {
   id: number;
@@ -10,9 +11,10 @@ interface Product {
   imageUrl: string;
   price: number;
   categoryId: number;
-  isPopular: boolean;
   createdAt: Date;
   updatedAt: Date;
+  isPopular: boolean; // Добавлено свойство isPopular
+  items?: ProductItem[]; // Добавлено свойство items, если оно используется
 }
 
 interface SearchModalProps {
