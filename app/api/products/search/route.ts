@@ -12,11 +12,16 @@ export async function GET(req: NextRequest) {
       },
     },
     take: query ? 5 : undefined,
-    select: {
-      items: true, 
-      isPopular: true,// Убедитесь, что загружаются все вариации товара
+    include: {
+      items: true, // Убедитесь, что загружаются все вариации товара
     },
   });
 
-  return NextResponse.json(products);
+  // Преобразуем данные, чтобы включить isPopular
+  const formattedProducts = products.map((product) => ({
+    ...product,
+    isPopular: product.isPopular || false, // Добавляем isPopular, если его нет
+  }));
+
+  return NextResponse.json(formattedProducts);
 }
