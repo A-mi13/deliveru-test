@@ -53,7 +53,7 @@ export const Header: React.FC<Props> = ({ className }) => {
 
   return (
     <header className={cn("", className)}>
-      <Container className="flex items-center justify-center py-[17px] px-[19px]">
+      <Container className="flex items-center justify-center py-[17px] px-[20px]">
         <div className="w-full h-[130px] overflow-x-auto whitespace-nowrap scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [-webkit-scrollbar]:hidden">
           {Array.isArray(cards) && cards.length > 0 ? (
             cards.map((card) => (
@@ -70,7 +70,7 @@ export const Header: React.FC<Props> = ({ className }) => {
       </Container>
 
       {isModalOpen && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
           <div className="bg-white p-4 rounded-md relative">
             <button className="absolute top-2 right-2 text-xl font-bold" onClick={() => setIsModalOpen(false)}>
               &times;

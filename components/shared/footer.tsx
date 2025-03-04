@@ -6,6 +6,7 @@ import SearchModal from "./searchModal";
 import { cn } from "@/lib/utils";
 import { SearchIcon, HeartIcon, UserIcon } from "lucide-react";
 import { useCart } from "@/components/shared/CartContext"; // Импортируем контекст корзины
+import { calculateTotalPrice } from "./priceCalculator";
 
 interface Props {
   className?: string;
@@ -38,16 +39,8 @@ export const Footer: React.FC<Props> = ({ className }) => {
   }, [pathname]);
 
   // Рассчитываем общую сумму товаров в корзине
-  const totalCartAmount = Object.values(cart).reduce((total, item) => {
-    const productTotal = item.product.price * item.count;
-  
-    // Проверяем, существуют ли ингредиенты
-    const ingredientsTotal = (item.ingredients ?? []).reduce((ingredientTotal, ingredient) => {
-      return ingredientTotal + ingredient.price * item.count; // Добавляем цену ингредиента
-    }, 0);
-  
-    return total + productTotal + ingredientsTotal; // Возвращаем общую сумму
-  }, 0);
+  const totalCartAmount = calculateTotalPrice(cart);
+  console.log("Footer totalCartAmount:", totalCartAmount);
 
   return (
     <>

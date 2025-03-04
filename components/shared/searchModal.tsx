@@ -10,6 +10,7 @@ interface Product {
   imageUrl: string;
   price: number;
   categoryId: number;
+  isPopular: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

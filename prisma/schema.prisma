@@ -70,6 +70,7 @@ model Product {
   name     String
   imageUrl String
   price    Int
+  isPopular Boolean @default(false) // Новое поле для популярных товаров
 
   ingredients Ingredient[]
   items       ProductItem[]

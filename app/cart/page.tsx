@@ -3,7 +3,13 @@ import React, { useEffect, useState } from "react";
 import { useCart } from "@/components/shared/CartContext";
 import ProductModal from "@/components/shared/ProductModal";
 import { useRouter } from "next/navigation";
+import { calculateFinalPrice, calculateTotalPrice } from "@/components/shared/priceCalculator";
 
+const sizeMapping: { [key: number]: string } = {
+  1: "маленький",
+  2: "средний",
+  3: "большой",
+};
 
 const CartPage: React.FC = () => {
   const { cart, isLoading, increaseCount, decreaseCount } = useCart();
@@ -17,16 +23,20 @@ const CartPage: React.FC = () => {
   const [freeShipping, setFreeShipping] = useState(false);
   const router = useRouter();
 
-  if (isLoading) return <div>Загрузка корзины...</div>;
+  if (isLoading) return <div></div>;
+  console.log("Cart data:", cart);
 
-  const totalItems = Object.values(cart).reduce((sum, item) => sum + item.count, 0);
+  const totalItems = Object.values(cart).reduce((sum, item) => sum + (item.count || 0), 0);
 
-  const totalPrice = Object.values(cart).reduce((sum, item) => {
-    const ingredientTotal = item.ingredients?.reduce((acc, ing) => acc + ing.price, 0) || 0;
-    return sum + item.count * (item.product.price + ingredientTotal);
-  }, 0);
+  const totalPrice = calculateTotalPrice(cart);
+  console.log("CartPage totalPrice:", totalPrice);
 
-  const finalPrice = Math.max(0, totalPrice + (freeShipping ? 0 : deliveryPrice) - discount);
+  const finalPrice = calculateFinalPrice(
+    totalPrice,
+    deliveryPrice,
+    discount,
+    freeShipping
+  );
 
   const handleApplyPromoCode = async () => {
     if (!promoCode) {
@@ -42,6 +52,14 @@ const CartPage: React.FC = () => {
         setFreeShipping(freeShipping);
         setPromoError("");
         setIsPromoApplied(true);
+
+        // Update totalAmount on the server
+        await fetch("/api/cart/updateTotalAmount", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: "1", totalAmount: totalPrice - discount }),
+        });
+
         return;
       } else {
         localStorage.removeItem(`promo_${promoCode}`);
@@ -60,11 +78,20 @@ const CartPage: React.FC = () => {
         throw new Error(errorData.error || "Ошибка при применении промокода");
       }
 
-      const { discount, freeShipping, expiresAt } = await response.json();
+      const { discount, freeShipping, expiresAt, updatedTotalAmount } =
+        await response.json();
+
       setDiscount(discount);
       setFreeShipping(freeShipping);
       setPromoError("");
       setIsPromoApplied(true);
+
+      // Update totalAmount on the server
+      await fetch("/api/cart/updateTotalAmount", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: "1", totalAmount: updatedTotalAmount }),
+      });
 
       localStorage.setItem(
         `promo_${promoCode}`,
@@ -79,12 +106,36 @@ const CartPage: React.FC = () => {
     }
   };
 
-  const handleRemovePromoCode = () => {
-    setPromoCode("");
-    setDiscount(0);
-    setFreeShipping(false);
-    setIsPromoApplied(false);
-    localStorage.removeItem(`promo_${promoCode}`);
+  const handleRemovePromoCode = async () => {
+    try {
+      // Reset local state
+      setPromoCode("");
+      setDiscount(0);
+      setFreeShipping(false);
+      setIsPromoApplied(false);
+
+      // Remove the promo code from localStorage
+      localStorage.removeItem(`promo_${promoCode}`);
+
+      // Recalculate the total price without the discount
+      const updatedTotalAmount = totalPrice + deliveryPrice;
+
+      // Update the total amount on the server
+      const response = await fetch("/api/cart/updateTotalAmount", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: "1", totalAmount: updatedTotalAmount }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Ошибка при обновлении стоимости на сервере");
+      }
+
+      console.log("Стоимость успешно обновлена на сервере");
+    } catch (error) {
+      console.error("Ошибка при удалении промокода:", error);
+      setPromoError("Ошибка при удалении промокода. Пожалуйста, попробуйте позже.");
+    }
   };
 
   const handleGoHome = () => {
@@ -108,8 +159,10 @@ const CartPage: React.FC = () => {
       <h1 className="text-2xl font-bold mb-4 mt-16">Корзина</h1>
       <div className="space-y-4">
         {Object.entries(cart).map(([id, item]) => {
-          const ingredientTotal = item.ingredients?.reduce((acc, ing) => acc + ing.price, 0) || 0;
-          const itemTotalPrice = item.count * (item.product.price + ingredientTotal);
+          if (!item.product) return null;
+          const productPrice = item.productItem?.price ?? item.product?.price ?? 0;
+          const ingredientTotal = item.ingredients?.reduce((acc, ing) => acc + (ing.price ?? 0), 0) || 0;
+          const itemTotalPrice = item.count * (productPrice + ingredientTotal);
 
           return (
             <div key={id} className="p-4 rounded-lg bg-gray-200" onClick={() => handleCardClick(item)}>
@@ -121,13 +174,19 @@ const CartPage: React.FC = () => {
                 />
                 <div className="ml-4 flex flex-col justify-between">
                   <h3 className="text-lg font-bold">{item.product.name}</h3>
+                  {/* Отображение выбранной вариации, если она есть */}
+                  {item.productItem && item.productItem.size && (
+                    <p className="text-sm text-gray-600">
+                      {sizeMapping[item.productItem.size]}
+                    </p>
+                  )}
                   {item.ingredients && item.ingredients.length > 0 && (
                     <div className="mt-2">
                       <p className="text-sm">Добавленные ингредиенты:</p>
                       <ul>
                         {item.ingredients.map((ing) => (
                           <li key={ing.id} className="text-xs">
-                            {ing.name} (+{ing.price} ₽)
+                            {ing.name} (+{ing.price ?? 0} ₽)
                           </li>
                         ))}
                       </ul>
@@ -141,7 +200,7 @@ const CartPage: React.FC = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      decreaseCount(item.id);
+                      decreaseCount(item.id, item.productItem?.id); // Передаем productId и productItemId
                     }}
                     className="px-3 py-1 text-white"
                   >
@@ -151,7 +210,7 @@ const CartPage: React.FC = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      increaseCount(item.id);
+                      increaseCount(item.id, item.productItem?.id); // Передаем productId и productItemId
                     }}
                     className="px-3 py-1 text-white"
                   >
@@ -227,7 +286,7 @@ const CartPage: React.FC = () => {
           product={selectedProduct}
           onClose={handleCloseModal}
           cart={cart}
-          handleAddToCart={() => {}}
+          handleAddToCart={() => { }}
         />
       )}
     </div>

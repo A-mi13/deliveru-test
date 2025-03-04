@@ -3,22 +3,15 @@ import { prisma } from "@/prisma/prisma-client";
 
 export async function POST(request: Request) {
   try {
-    const { productId, quantity, userId, ingredients } = await request.json();
+    const { productId, productItemId, quantity, userId, ingredients } = await request.json();
 
-    console.log("Received data:", { productId, quantity, userId, ingredients });
-
-    // Получаем корзину пользователя
     let cart = await prisma.cart.findUnique({
       where: { userId },
       include: {
         items: {
           include: {
-            productItem: {
-              include: { product: true },
-            },
-            ingredients: {
-              include: { ingredient: true },
-            },
+            productItem: { include: { product: true } },
+            ingredients: { include: { ingredient: true } },
           },
         },
       },
@@ -38,15 +31,13 @@ export async function POST(request: Request) {
       });
     }
 
-    // Проверяем, существует ли продукт
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
 
-    // Получаем или создаем `productItem`
     let productItem = await prisma.productItem.findFirst({
-      where: { productId: product.id },
+      where: { productId: product.id, id: productItemId },
     });
 
     if (!productItem) {
@@ -59,7 +50,6 @@ export async function POST(request: Request) {
       });
     }
 
-    // Проверяем, есть ли товар в корзине
     let cartItem = await prisma.cartItem.findFirst({
       where: {
         cartId: cart.id,
@@ -82,7 +72,6 @@ export async function POST(request: Request) {
       });
     }
 
-    // Обновляем или добавляем ингредиенты
     if (ingredients && ingredients.length > 0) {
       for (const ingredient of ingredients) {
         const { id: ingredientId, quantity: ingredientQuantity } = ingredient;
@@ -108,7 +97,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // Повторно загружаем обновленную корзину
     const updatedCart = await prisma.cart.findUnique({
       where: { id: cart.id },
       include: {
@@ -125,22 +113,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Cart not found" }, { status: 404 });
     }
 
-    // Пересчитываем `totalAmount`
     const totalPrice = updatedCart.items.reduce((sum, item) => {
-      const ingredientTotal = item.ingredients.reduce((acc, ing) => acc + ing.ingredient.price * ing.quantity, 0);
-      return sum + item.quantity * item.productItem.product.price + ingredientTotal;
+      const ingredientTotal = item.ingredients.reduce(
+        (acc, ing) => acc + ing.ingredient.price * ing.quantity,
+        0
+      );
+      return sum + item.quantity * item.productItem.price + ingredientTotal;
     }, 0);
 
     const deliveryPrice = 50;
     const totalAmount = totalPrice + deliveryPrice;
 
-    // Обновляем `totalAmount` в базе
     await prisma.cart.update({
       where: { id: cart.id },
       data: { totalAmount },
     });
 
-    return NextResponse.json({ success: true, totalAmount });
+    return NextResponse.json({ success: true, totalAmount, cart: updatedCart });
   } catch (error) {
     console.error("Failed to add to cart:", error);
     return NextResponse.json({ error: "Failed to add to cart" }, { status: 500 });

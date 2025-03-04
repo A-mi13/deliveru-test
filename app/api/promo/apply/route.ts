@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/prisma/prisma-client";
 
 export async function POST(req: Request) {
-  const { promoCode, totalAmount } = await req.json();
+  const { promoCode, totalAmount, userId } = await req.json();
 
   // Находим промокод в базе данных
   const promo = await prisma.promoCode.findUnique({
@@ -48,6 +48,14 @@ export async function POST(req: Request) {
     discount = promo.discountValue;
   }
 
+  // Обновляем общую стоимость корзины на сервере
+  const updatedTotalAmount = totalAmount - discount;
+
+  await prisma.cart.update({
+    where: { userId: Number(userId) },
+    data: { totalAmount: updatedTotalAmount },
+  });
+
   // Возвращаем успешный ответ с суммой скидки
-  return NextResponse.json({ discount });
+  return NextResponse.json({ discount, updatedTotalAmount });
 }

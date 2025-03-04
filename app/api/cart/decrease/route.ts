@@ -1,26 +1,27 @@
-// app\api\cart\decrease
-
 import { NextResponse } from "next/server";
 import { prisma } from "@/prisma/prisma-client";
 
 export async function DELETE(request: Request) {
   try {
-    const { productId, userId } = await request.json();
+    const { productId, productItemId, userId } = await request.json();
 
-    // Проверяем, существует ли корзина для пользователя
+    console.log("Received data:", { productId, productItemId, userId });
+
+    if (!productId || !userId) {
+      return NextResponse.json(
+        { error: "Missing required fields: productId or userId" },
+        { status: 400 }
+      );
+    }
+
+    // Находим корзину пользователя
     const cart = await prisma.cart.findUnique({
       where: { userId },
       include: {
         items: {
           include: {
-            productItem: {
-              include: { product: true },
-            },
-            ingredients: {
-              include: {
-                ingredient: true,
-              },
-            },
+            productItem: true,
+            ingredients: true,
           },
         },
       },
@@ -30,77 +31,57 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Cart not found" }, { status: 404 });
     }
 
-    // Проверяем, существует ли продукт с указанным productId
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
-    });
-
-    if (!product) {
-      return NextResponse.json({ error: "Product not found" }, { status: 404 });
-    }
-
-    // Проверяем, существует ли productItem для данного productId
-    const productItem = await prisma.productItem.findFirst({
-      where: { productId: product.id },
-    });
-
-    if (!productItem) {
-      return NextResponse.json({ error: "ProductItem not found" }, { status: 404 });
-    }
-
-    // Проверяем, есть ли уже такой товар в корзине
-    const existingCartItem = await prisma.cartItem.findFirst({
+    // Находим товар в корзине
+    const cartItem = await prisma.cartItem.findFirst({
       where: {
         cartId: cart.id,
-        productItemId: productItem.id,
+        productItemId: productItemId || undefined,
+      },
+      include: {
+        productItem: true, // Включаем productItem для проверки
       },
     });
 
-    if (!existingCartItem) {
+    if (!cartItem) {
       return NextResponse.json({ error: "Item not found in cart" }, { status: 404 });
     }
 
-    // Уменьшаем количество товара или удаляем его, если количество = 1
-    if (existingCartItem.quantity > 1) {
+    // Уменьшаем количество товара или удаляем его
+    if (cartItem.quantity > 1) {
       await prisma.cartItem.update({
-        where: { id: existingCartItem.id },
-        data: { quantity: existingCartItem.quantity - 1 },
+        where: { id: cartItem.id },
+        data: { quantity: cartItem.quantity - 1 },
       });
     } else {
-      // Удаляем все связанные ингредиенты перед удалением cartItem
+      // Удаляем ингредиенты
       await prisma.cartItemIngredient.deleteMany({
-        where: { cartItemId: existingCartItem.id },
+        where: { cartItemId: cartItem.id },
       });
 
-      // Удаляем cartItem
+      // Удаляем товар из корзины
       await prisma.cartItem.delete({
-        where: { id: existingCartItem.id },
+        where: { id: cartItem.id },
       });
 
-      // Удаляем productItem, если он больше не используется в других корзинах
-      const otherCartItems = await prisma.cartItem.findMany({
-        where: { productItemId: productItem.id },
-      });
-
-      if (otherCartItems.length === 0) {
+      // Проверяем, нужно ли удалить productItem
+      if (cartItem.productItem && cartItem.productItem.size === null) {
+        // Если у productItem нет размера, удаляем его
         await prisma.productItem.delete({
-          where: { id: productItem.id },
+          where: { id: cartItem.productItem.id },
         });
       }
     }
 
-    // Получаем обновленные данные корзины
+    // Пересчитываем totalAmount
     const updatedCart = await prisma.cart.findUnique({
       where: { id: cart.id },
       include: {
         items: {
           include: {
-            productItem: {
-              include: { product: true },
-            },
+            productItem: true,
             ingredients: {
               include: {
-                ingredient: true,
+                ingredient: true, // Добавляем загрузку связанного объекта ingredient
               },
             },
           },
@@ -112,16 +93,17 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Cart not found" }, { status: 404 });
     }
 
-    // Пересчитываем totalAmount
     const totalPrice = updatedCart.items.reduce((sum, item) => {
-      const ingredientTotal = item.ingredients.reduce((acc, ing) => acc + ing.ingredient.price * ing.quantity, 0);
-      return sum + (item.quantity * item.productItem.product.price) + ingredientTotal;
+      const ingredientTotal = item.ingredients.reduce(
+        (acc, ing) => acc + ing.ingredient.price * ing.quantity,
+        0
+      );
+      return sum + item.quantity * item.productItem.price + ingredientTotal;
     }, 0);
 
     const deliveryPrice = 50; // Пример стоимости доставки
     const totalAmount = totalPrice + deliveryPrice;
 
-    // Обновляем поле totalAmount в корзине
     await prisma.cart.update({
       where: { id: cart.id },
       data: { totalAmount },
@@ -129,9 +111,12 @@ export async function DELETE(request: Request) {
 
     return NextResponse.json({ success: true, totalAmount });
   } catch (error) {
-    console.error("Failed to decrease count:", error);
+    console.error("Failed to increase count:", error);
+
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
     return NextResponse.json(
-      { error: "Failed to decrease count" },
+      { error: "Failed to increase count", details: errorMessage },
       { status: 500 }
     );
   }

@@ -102,7 +102,7 @@ const FavoritesPage = () => {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        increaseCount(product.id);
+                        increaseCount(product.id); // Увеличиваем количество
                       }}
                       className="bg-white text-black w-6 h-6 rounded-full flex items-center justify-center"
                     >
@@ -112,7 +112,7 @@ const FavoritesPage = () => {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        decreaseCount(product.id);
+                        decreaseCount(product.id); // Уменьшаем количество
                       }}
                       className="bg-white text-black w-6 h-6 rounded-full flex items-center justify-center"
                     >
@@ -125,7 +125,7 @@ const FavoritesPage = () => {
                     style={{ borderRadius: "0.5rem 0.5rem 0.5rem 0.5rem" }}
                     onClick={(e) => {
                       e.stopPropagation();
-                      addToCart(product.id);
+                      addToCart(product.id); // Добавляем товар в корзину
                     }}
                   >
                     +

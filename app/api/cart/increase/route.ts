@@ -1,93 +1,102 @@
-// app\api\cart\increase
 import { NextResponse } from "next/server";
 import { prisma } from "@/prisma/prisma-client";
 
 export async function PUT(request: Request) {
   try {
-    const { productId, userId } = await request.json();
+    const { productId, productItemId, userId } = await request.json();
 
-    console.log("Received data:", { productId, userId });
-
-    // Проверяем, существует ли корзина для пользователя
-    let cart = await prisma.cart.findUnique({
-      where: { userId },
-    });
-
-    console.log("Cart found:", cart);
-
-    // Если корзины нет, создаем новую
-    if (!cart) {
-      cart = await prisma.cart.create({
-        data: {
-          userId,
-          token: "", // Убедитесь, что поле token передается, если оно обязательно
-        },
-      });
-      console.log("New cart created:", cart);
-    }
-
-    // Проверяем, существует ли продукт с указанным productId
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
-    });
-
-    if (!product) {
+    if (!productId || !userId) {
       return NextResponse.json(
-        { error: "Product not found" },
-        { status: 404 }
+        { error: "Missing required fields: productId or userId" },
+        { status: 400 }
       );
     }
 
-    // Создаем ProductItem на основе Product, если он еще не существует
-    let productItem = await prisma.productItem.findFirst({
-      where: {
-        productId: product.id,
+    // Находим корзину пользователя
+    const cart = await prisma.cart.findUnique({
+      where: { userId },
+      include: {
+        items: {
+          include: {
+            productItem: true,
+            ingredients: true,
+          },
+        },
       },
     });
 
-    if (!productItem) {
-      productItem = await prisma.productItem.create({
-        data: {
-          productId: product.id,
-          price: product.price, // Копируем цену из Product
-          type: 0, // Значение по умолчанию для поля type
-        },
-      });
-      console.log("New product item created:", productItem);
+    if (!cart) {
+      return NextResponse.json({ error: "Cart not found" }, { status: 404 });
     }
 
-    // Проверяем, есть ли уже такой товар в корзине
-    const existingCartItem = await prisma.cartItem.findFirst({
+    // Находим товар в корзине
+    const cartItem = await prisma.cartItem.findFirst({
       where: {
         cartId: cart.id,
-        productItemId: productItem.id,
+        productItemId: productItemId || undefined,
       },
     });
 
-    console.log("Existing cart item:", existingCartItem);
-
-    if (existingCartItem) {
-      // Если товар уже есть в корзине, увеличиваем его количество
-      await prisma.cartItem.update({
-        where: { id: existingCartItem.id },
-        data: { quantity: existingCartItem.quantity + 1 },
-      });
-    } else {
-      // Если товара нет в корзине, добавляем его
-      await prisma.cartItem.create({
-        data: {
-          cartId: cart.id,
-          productItemId: productItem.id,
-          quantity: 1, // Начальное количество
-        },
-      });
+    if (!cartItem) {
+      return NextResponse.json({ error: "Item not found in cart" }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true });
+    // Увеличиваем количество товара
+    await prisma.cartItem.update({
+      where: { id: cartItem.id },
+      data: { quantity: cartItem.quantity + 1 },
+    });
+
+    // Пересчитываем totalAmount
+    const updatedCart = await prisma.cart.findUnique({
+      where: { id: cart.id },
+      include: {
+        items: {
+          include: {
+            productItem: true,
+            ingredients: {
+              include: {
+                ingredient: true, // Добавляем загрузку связанного объекта ingredient
+              },
+            },
+          },
+        },
+      },
+    });
+    
+
+    if (!updatedCart) {
+      return NextResponse.json({ error: "Cart not found" }, { status: 404 });
+    }
+
+    const totalPrice = updatedCart.items.reduce((sum, item) => {
+      // Считаем сумму ингредиентов для одного товара
+      const ingredientTotal = item.ingredients.reduce(
+        (acc, ing) => acc + ing.ingredient.price * ing.quantity,
+        0
+      );
+    
+      // Добавляем стоимость товара с учетом ингредиентов, умноженную на количество
+      return sum + item.quantity * (item.productItem.price + ingredientTotal);
+    }, 0);
+
+    const deliveryPrice = 50; // Пример стоимости доставки
+    const totalAmount = totalPrice + deliveryPrice;
+
+    // Обновляем totalAmount в базе
+    await prisma.cart.update({
+      where: { id: cart.id },
+      data: { totalAmount },
+    });
+
+    return NextResponse.json({ success: true, totalAmount });
   } catch (error) {
     console.error("Failed to increase count:", error);
+  
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+  
     return NextResponse.json(
-      { error: "Failed to increase count" },
+      { error: "Failed to increase count", details: errorMessage },
       { status: 500 }
     );
   }

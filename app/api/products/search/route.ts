@@ -12,6 +12,10 @@ export async function GET(req: NextRequest) {
       },
     },
     take: query ? 5 : undefined,
+    select: {
+      items: true, 
+      isPopular: true,// Убедитесь, что загружаются все вариации товара
+    },
   });
 
   return NextResponse.json(products);

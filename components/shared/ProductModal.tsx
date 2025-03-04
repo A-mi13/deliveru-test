@@ -6,12 +6,26 @@ import { useFavorites } from "./FavoritesContext";
 import Notification from "./Notification";
 import { useCart } from "./CartContext";
 import { useRouter } from "next/navigation";
+import { calculateItemTotalPrice } from "./priceCalculator";
+
+// Маппинг для отображения размеров
+const sizeMapping: { [key: number]: string } = {
+  1: "маленький",
+  2: "средний",
+  3: "большой",
+};
+
+interface ProductItem {
+  id: number;
+  size: number; // Размер теперь число
+  price: number;
+}
 
 interface ProductModalProps {
-  product: Product;
+  product: Product & { items?: ProductItem[] }; // Добавляем поле для вариаций продукта
   onClose: () => void;
   cart: Record<number, any>;
-  handleAddToCart: (productId: number) => void;
+  handleAddToCart: (productId: number, productItemId?: number) => void;
 }
 
 const ProductModal: React.FC<ProductModalProps> = ({
@@ -29,11 +43,46 @@ const ProductModal: React.FC<ProductModalProps> = ({
     backgroundColor: string;
   } | null>(null);
   const [showAllIngredients, setShowAllIngredients] = useState(false);
+  const [selectedSize, setSelectedSize] = useState<number | undefined>(undefined); // Состояние для выбранного размера (ID вариации)
   const router = useRouter();
 
   const isFavorite = favorites.includes(product.id);
-  const isInCart = Boolean(cart[product.id]);
-  const cartItem = cart[product.id] || { count: 0, ingredients: [] };
+  const isInCart = Boolean(
+    Object.values(cart).find(
+      (item) =>
+        item.product.id === product.id && item.productItem?.id === selectedSize
+    )
+  );
+
+  // Находим текущий элемент корзины для выбранной вариации
+  const cartItem =
+    Object.values(cart).find(
+      (item) =>
+        item.product.id === product.id && item.productItem?.id === selectedSize
+    ) || { count: 0, ingredients: [] };
+
+  // Устанавливаем выбранную вариацию при открытии модального окна
+  useEffect(() => {
+    // Находим элемент корзины для текущего продукта
+    const cartItem = Object.values(cart).find(
+      (item) => item.product.id === product.id
+    );
+
+    if (cartItem && cartItem.productItem?.id) {
+      // Если продукт уже в корзине, выбираем вариацию из корзины
+      setSelectedSize(cartItem.productItem.id);
+    } else if (product.items && product.items.length > 0) {
+      // Если продукта нет в корзине, выбираем вариацию с минимальной стоимостью
+      const minPriceItem = product.items.reduce((minItem, currentItem) => {
+        return currentItem.price < (minItem?.price ?? Infinity) ? currentItem : minItem;
+      }, product.items[0]);
+      setSelectedSize(minPriceItem.id);
+    }
+  }, [cart, product]); // Пустой массив зависимостей, чтобы useEffect сработал только при монтировании
+
+  // Получаем цену выбранной вариации
+  const selectedProductItem = product.items?.find((item) => item.id === selectedSize);
+  const priceToDisplay = selectedProductItem?.price || product.price; // Если вариация не выбрана, показываем цену продукта
 
   const toggleFavorite = () => {
     if (isFavorite) {
@@ -53,20 +102,23 @@ const ProductModal: React.FC<ProductModalProps> = ({
 
   const handleAddIngredient = async (ingredientId: number) => {
     if (!isInCart) {
-      await handleAddToCart(product.id);
+      await handleAddToCart(product.id, selectedSize);
     }
-    setTimeout(() => addIngredient(product.id, ingredientId), 100);
+    setTimeout(() => addIngredient(product.id, ingredientId, selectedSize), 100);
   };
 
   const handleRemoveIngredient = (ingredientId: number) => {
     removeIngredient(product.id, ingredientId);
   };
 
-  const totalPrice =
-    (cartItem.count || 1) * (product.price || 0) +
-    (cartItem.ingredients || []).reduce((sum: number, ing: { price: number }) => sum + (ing?.price || 0), 0);
+  const totalPrice = calculateItemTotalPrice({
+    productItem: selectedProductItem,
+    product,
+    ingredients: cartItem.ingredients,
+    count: cartItem.count || 1,
+  });
 
-  console.log("Общая стоимость: ", totalPrice);
+  console.log("ProductModal totalPrice:", totalPrice);
 
   if (isLoading) {
     return <div>Loading ingredients...</div>;
@@ -79,6 +131,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
           isFullScreen ? "h-[100%]" : "h-[70%]"
         } rounded-t-lg p-4 relative overflow-y-auto no-scrollbar transition-all duration-300`}
       >
+        {/* Ползунок для изменения высоты */}
         <div
           className="w-[134px] h-[5px] bg-gray-300 rounded-full mx-auto mb-4 cursor-pointer"
           onTouchStart={(e) => (startY.current = e.touches[0].clientY)}
@@ -90,9 +143,11 @@ const ProductModal: React.FC<ProductModalProps> = ({
           }}
           onTouchEnd={() => (startY.current = null)}
         />
+        {/* Кнопка закрытия */}
         <button className="absolute top-2 right-2 text-gray-600" onClick={onClose}>
           ×
         </button>
+        {/* Изображение продукта */}
         <div className="relative">
           <img
             src={product.imageUrl}
@@ -106,6 +161,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
             />
           </button>
         </div>
+        {/* Уведомление */}
         {notification && (
           <Notification
             message={notification.message}
@@ -113,12 +169,32 @@ const ProductModal: React.FC<ProductModalProps> = ({
             backgroundColor={notification.backgroundColor}
           />
         )}
+        {/* Название и цена продукта */}
         <h3 className="text-xl w-full font-bold mt-2">{product.name}</h3>
         {product.price && <p className="text-lg mt-1">{product.price}₽</p>}
         <p className="mt-2">Описание товара...</p>
-
-        {/* Условный рендеринг ингредиентов */}
-        {product.categoryId !== 3 && ( // Проверяем categoryID
+        {/* Выбор размера через кнопки */}
+        {product.items && product.items.length > 0 && (
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Размер</label>
+            <div className="flex gap-2 justify-center">
+              {product.items.map((item) => (
+                <button
+                  key={item.id}
+                  className={`bg-[#70B9BE] text-white px-4 py-2 rounded-full transition-colors ${
+                    selectedSize === item.id ? "opacity-100" : "opacity-70 hover:opacity-100"
+                  }`}
+                  onClick={() => setSelectedSize(item.id)}
+                >
+                  {/* Отображаем текстовое описание размера */}
+                  {sizeMapping[item.size]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {/* Ингредиенты */}
+        {product.categoryId !== 3 && (
           <div className="pb-20">
             <div className="grid grid-cols-3 gap-2 mt-4 pb-2">
               {(showAllIngredients ? allIngredients : allIngredients.slice(0, 3)).map((ingredient) => (
@@ -151,7 +227,7 @@ const ProductModal: React.FC<ProductModalProps> = ({
             )}
           </div>
         )}
-
+        {/* Кнопка добавления в корзину */}
         <div className="fixed max-w-[430px] mx-auto bottom-0 left-0 right-0 bg-white p-4">
           {isInCart ? (
             <button
@@ -163,9 +239,16 @@ const ProductModal: React.FC<ProductModalProps> = ({
           ) : (
             <button
               className="bg-[#70B9BE] text-white w-full py-3 rounded-full"
-              onClick={() => handleAddToCart(product.id)}
+              onClick={() => {
+                if (product.items && product.items.length > 0 && !selectedSize) {
+                  alert("Пожалуйста, выберите размер");
+                  return;
+                }
+                console.log("Добавляю в корзину:", selectedSize);
+                handleAddToCart(product.id, selectedSize);
+              }}
             >
-              В корзину за {product.price}₽
+              Добавить в корзину за {priceToDisplay}₽
             </button>
           )}
         </div>

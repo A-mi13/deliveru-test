@@ -30,10 +30,13 @@ export async function getServerSideProps(context: any) {
     const items = cart.items.map((item) => ({
       productItemId: item.productItemId,
       quantity: item.quantity,
+      productItem: {
+        id: item.productItem.id,
+        price: item.productItem.price, // ✅ Берем цену вариации
+      },
       product: {
         id: item.productItem.product.id,
         name: item.productItem.product.name,
-        price: item.productItem.product.price,
         imageUrl: item.productItem.product.imageUrl,
         categoryId: item.productItem.product.categoryId,
       },

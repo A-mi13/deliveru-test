@@ -1,6 +1,7 @@
 "use client";
+import { ProductItem } from "@prisma/client";
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-
+import { calculateItemTotalPrice, calculateTotalPrice } from "./priceCalculator";
 
 interface Product {
   id: number;
@@ -8,6 +9,7 @@ interface Product {
   price: number;
   imageUrl: string;
   categoryId: number;
+  items?: ProductItem[];
 }
 
 interface Ingredient {
@@ -21,21 +23,24 @@ interface CartItem {
   id: number;
   count: number;
   product: Product;
+  productItem?: ProductItem;
   ingredients?: Ingredient[];
+  totalPrice?: number;
 }
 
 interface CartContextProps {
   cart: Record<number, CartItem>;
   setCart: (cart: Record<number, CartItem>) => void;
-  addToCart: (id: number) => void;
-  increaseCount: (id: number) => void;
-  decreaseCount: (id: number) => void;
-  addIngredient: (productId: number, ingredientId: number) => void;
+  addToCart: (id: number, productItemId?: number) => void;
+  increaseCount: (id: number, productItemId?: number) => void; 
+  decreaseCount: (id: number, productItemId?: number) => void;
+  addIngredient: (productId: number, ingredientId: number, productItemId?: number) => void;
   removeIngredient: (productId: number, ingredientId: number) => void;
   isLoading: boolean;
   error: string | null;
   allIngredients: Ingredient[];
-  updateTotalAmount: (totalAmount: number) => Promise<void>; // Добавляем функцию для обновления totalAmount
+  updateTotalAmount: (totalAmount: number) => Promise<void>;
+  totalAmount: number;
 }
 
 const CartContext = createContext<CartContextProps | undefined>(undefined);
@@ -45,6 +50,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [allIngredients, setAllIngredients] = useState<Ingredient[]>([]);
+  const [totalAmount, setTotalAmount] = useState<number>(0);
 
   const fetchCartFromServer = useCallback(async () => {
     try {
@@ -53,18 +59,37 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!response.ok) throw new Error("Failed to fetch cart");
       const data = await response.json();
   
-      // Преобразуем данные в формат, который ожидается в состоянии корзины
       const cartItems = data.items.reduce((acc: Record<number, CartItem>, item: any) => {
-        acc[item.id] = {
-          id: item.id,
-          count: item.count,
+        // Проверяем и преобразуем числовые поля
+  
+        // Проверяем, что product существует
+        if (!item.product) {
+          console.warn("Product is missing in item:", item);
+          return acc;
+        }
+  
+        // Создаем объект CartItem
+        acc[item.product.id] = {
+          id: item.product.id,
+          count: item.count, // Используем quantity
           product: item.product,
-          ingredients: item.ingredients || [], // Добавляем ингредиенты
+          ingredients: item.ingredients?.map((ing: any) => ({
+            ...ing.ingredient,
+            price: Number(ing.ingredient.price) || 0, // Преобразуем price в число
+          })) || [],
+          productItem: item.productItem
+            ? {
+                ...item.productItem,
+                price: Number(item.productItem.price) || 0, // Преобразуем price в число
+              }
+            : null,
+          totalPrice: item.totalPrice, // Используем totalPrice
         };
         return acc;
       }, {});
   
-      setCart(cartItems);
+      setCart(cartItems); // Обновляем состояние корзины
+      setTotalAmount(Number(data.totalAmount) || 0); // Преобразуем totalAmount в число
     } catch (error) {
       console.error("Failed to fetch cart:", error);
       setError("Failed to fetch cart. Please try again later.");
@@ -98,9 +123,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response = await fetch("/api/cart/updateTotalAmount", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: 1, totalAmount }), // Замените "1" на реальный userId
+        body: JSON.stringify({ userId: 1, totalAmount }),
       });
-  
+
       if (!response.ok) {
         throw new Error("Ошибка при обновлении totalAmount");
       }
@@ -110,27 +135,33 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const addToCart = useCallback(async (id: number) => {
+
+  const addToCart = useCallback(async (id: number, productItemId?: number) => {
     try {
-      // Получаем продукт из базы данных
-      const response = await fetch(`/api/products/${id}`);
-      if (!response.ok) throw new Error("Failed to fetch product");
-      const product = await response.json();
-  
+      const productResponse = await fetch(`/api/products/${id}`);
+      if (!productResponse.ok) throw new Error("Failed to fetch product");
+      const product = await productResponse.json();
+
       if (!product) throw new Error("Product not found");
-  
-      // Добавляем продукт в корзину
+
+      let productItem: ProductItem | undefined;
+      if (productItemId) {
+        const productItemResponse = await fetch(`/api/product-items/${productItemId}`);
+        if (!productItemResponse.ok) throw new Error("Failed to fetch product item");
+        productItem = await productItemResponse.json();
+      }
+
       await fetch("/api/cart/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId: id, quantity: 1, userId: 1 }),
+        body: JSON.stringify({ productId: id, quantity: 1, userId: 1, productItemId }),
       });
-  
+
       setCart((prev) => ({
         ...prev,
         [id]: prev[id]
           ? { ...prev[id], count: prev[id].count + 1 }
-          : { id, count: 1, product, ingredients: [] },
+          : { id, count: 1, product, ingredients: [], productItem },
       }));
     } catch (error) {
       console.error("Failed to add to cart:", error);
@@ -138,93 +169,117 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const increaseCount = useCallback(
-    async (id: number) => {
-      try {
-        await fetch("/api/cart/increase", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ productId: id, userId: 1 }),
-        });
-  
-        setCart((prev) => {
-          const updatedItem = prev[id];
-          const newCount = updatedItem.count + 1;
-          const ingredientsCost = updatedItem.ingredients?.reduce(
-            (sum, ingredient) => sum + ingredient.price,
-            0
-          ) || 0;
-  
-          const newTotalPrice =
-            updatedItem.product.price * newCount + ingredientsCost * newCount;
-  
-          // Обновляем totalAmount на сервере
-          updateTotalAmount(newTotalPrice);
-  
-          return {
-            ...prev,
-            [id]: { ...updatedItem, count: newCount, totalPrice: newTotalPrice },
-          };
-        });
-      } catch (error) {
-        console.error("Ошибка при увеличении количества:", error);
-        setError("Ошибка при увеличении количества. Пожалуйста, попробуйте позже.");
-      }
-    },
-    [updateTotalAmount]
-  );
-
-  const decreaseCount = useCallback(async (id: number) => {
+  const increaseCount = useCallback(async (id: number, productItemId?: number) => {
     try {
-      const productItemId = cart[id]?.id; // Используем правильный id
-      if (!productItemId) return;
-  
-      await fetch("/api/cart/decrease", {
-        method: "DELETE",
+      const response = await fetch("/api/cart/increase", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId: productItemId, userId: 1 }),
+        body: JSON.stringify({ productId: id, productItemId, userId: 1 }),
       });
   
+      if (!response.ok) {
+        throw new Error("Ошибка при увеличении количества");
+      }
+  
+      const data = await response.json();
+  
+      // Обновляем состояние корзины
       setCart((prev) => {
         const updatedCart = { ...prev };
         if (updatedCart[id]) {
-          if (updatedCart[id].count > 1) {
-            updatedCart[id] = { ...updatedCart[id], count: updatedCart[id].count - 1 };
+          updatedCart[id] = { ...updatedCart[id], count: updatedCart[id].count + 1 };
+        }
+        return updatedCart;
+      });
+  
+      // Обновляем totalAmount на клиенте
+      if (data.totalAmount) {
+        updateTotalAmount(data.totalAmount);
+      }
+    } catch (error) {
+      console.error("Ошибка при увеличении количества:", error);
+      setError("Ошибка при увеличении количества. Пожалуйста, попробуйте позже.");
+    }
+  }, [cart, updateTotalAmount]);
+
+  const decreaseCount = useCallback(async (productId: number, productItemId?: number) => {
+    try {
+      await fetch("/api/cart/decrease", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId, productItemId, userId: 1 }),
+      });
+  
+      setCart((prevCart) => {
+        const updatedCart = { ...prevCart };
+  
+        if (updatedCart[productId]) {
+          if (updatedCart[productId].count > 1) {
+            updatedCart[productId] = { ...updatedCart[productId], count: updatedCart[productId].count - 1 };
           } else {
-            delete updatedCart[id];
+            delete updatedCart[productId];
           }
         }
+  
+        // Пересчитываем totalAmount на основе обновленного корзины
+        const totalPrice = calculateTotalPrice(updatedCart);
+        const deliveryPrice = 50;
+        const totalAmount = totalPrice + deliveryPrice;
+  
+        updateTotalAmount(totalAmount); // Обновляем сумму на сервере
+  
         return updatedCart;
       });
     } catch (error) {
       console.error("Failed to decrease count:", error);
       setError("Failed to decrease count. Please try again later.");
     }
-  }, [cart]);
+  }, [updateTotalAmount]);
+  
+  const addIngredient = useCallback(async (productId: number, ingredientId: number, productItemId?: number) => {
+  try {
+    const ingredient = allIngredients.find((ing) => ing.id === ingredientId);
+    if (!ingredient) throw new Error("Ingredient not found");
 
-  const addIngredient = useCallback(async (productId: number, ingredientId: number) => {
-    try {
-      const ingredient = allIngredients.find((ing) => ing.id === ingredientId);
-      if (!ingredient) throw new Error("Ingredient not found");
+    setCart((prev) => {
+      const updatedCart = { ...prev };
+      const cartItem = updatedCart[productId];
 
-      setCart((prev) => ({
-        ...prev,
-        [productId]: {
-          ...prev[productId],
-          ingredients: [...(prev[productId]?.ingredients || []), ingredient],
-        },
-      }));
+      if (cartItem) {
+        // Проверяем, есть ли уже такой ингредиент
+        const isIngredientExists = cartItem.ingredients?.some((ing) => ing.id === ingredientId);
+        if (!isIngredientExists) {
+          // Если ингредиента нет, добавляем его
+          cartItem.ingredients = [...(cartItem.ingredients || []), ingredient];
+          cartItem.productItem = cartItem.productItem || (productItemId ? { id: productItemId } as ProductItem : undefined);
 
-      await fetch("/api/cart/addIngredient", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId, ingredientId, userId: 1 }),
-      });
-    } catch (error) {
-      console.error("Failed to add ingredient:", error);
-      setError("Failed to add ingredient. Please try again later.");
-    }
-  }, [allIngredients]);
+          // Пересчитываем totalPrice для товара
+          const itemTotalPrice = calculateItemTotalPrice(cartItem);
+          cartItem.totalPrice = itemTotalPrice;
+        }
+      }
+
+      // Пересчитываем totalAmount для всей корзины
+      const cartTotalPrice = calculateTotalPrice(updatedCart);
+      const deliveryPrice = 50;
+      const totalAmount = cartTotalPrice + deliveryPrice;
+
+      // Обновляем totalAmount на сервере
+      updateTotalAmount(totalAmount);
+
+      return updatedCart;
+    });
+
+    await fetch("/api/cart/addIngredient", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, ingredientId, productItemId, userId: 1, price: ingredient.price }),
+    });
+  } catch (error) {
+    console.error("Failed to add ingredient:", error);
+    setError("Failed to add ingredient. Please try again later.");
+  }
+}, [allIngredients]);
 
   const removeIngredient = useCallback(async (productId: number, ingredientId: number) => {
     try {
@@ -260,8 +315,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         error,
         allIngredients,
-        updateTotalAmount
-        
+        updateTotalAmount,
+        totalAmount,
       }}
     >
       {children}
