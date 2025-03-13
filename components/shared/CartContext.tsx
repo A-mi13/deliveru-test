@@ -41,6 +41,10 @@ interface CartContextProps {
   allIngredients: Ingredient[];
   updateTotalAmount: (totalAmount: number) => Promise<void>;
   totalAmount: number;
+  totalPrice: number; // Добавляем totalPrice
+  deliveryPrice: number; // Добавляем deliveryPrice
+  discount: number; // Добавляем discount
+  freeShipping: boolean; // Добавляем freeShipping
 }
 
 const CartContext = createContext<CartContextProps | undefined>(undefined);
@@ -51,6 +55,15 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [error, setError] = useState<string | null>(null);
   const [allIngredients, setAllIngredients] = useState<Ingredient[]>([]);
   const [totalAmount, setTotalAmount] = useState<number>(0);
+  const [totalPrice, setTotalPrice] = useState<number>(0); // Добавляем состояние для totalPrice
+  const [deliveryPrice, setDeliveryPrice] = useState<number>(50); // Добавляем состояние для deliveryPrice
+  const [discount, setDiscount] = useState<number>(0); // Добавляем состояние для discount
+  const [freeShipping, setFreeShipping] = useState<boolean>(false); // Добавляем состояние для freeShipping
+
+  const updateTotalPrice = useCallback((cart: Record<number, CartItem>) => {
+    const calculatedTotalPrice = calculateTotalPrice(cart);
+    setTotalPrice(calculatedTotalPrice);
+  }, []);
 
   const fetchCartFromServer = useCallback(async () => {
     try {
@@ -60,43 +73,39 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await response.json();
   
       const cartItems = data.items.reduce((acc: Record<number, CartItem>, item: any) => {
-        // Проверяем и преобразуем числовые поля
-  
-        // Проверяем, что product существует
         if (!item.product) {
-          console.warn("Product is missing in item:", item);
+          console.warn("Пропущен item без product:", item);
           return acc;
         }
-  
-        // Создаем объект CartItem
+      
         acc[item.product.id] = {
           id: item.product.id,
-          count: item.count, // Используем quantity
+          count: item.count,
           product: item.product,
-          ingredients: item.ingredients?.map((ing: any) => ({
-            ...ing.ingredient,
-            price: Number(ing.ingredient.price) || 0, // Преобразуем price в число
-          })) || [],
-          productItem: item.productItem
-            ? {
-                ...item.productItem,
-                price: Number(item.productItem.price) || 0, // Преобразуем price в число
-              }
-            : null,
-          totalPrice: item.totalPrice, // Используем totalPrice
+          ingredients: item.ingredients || [],
+          productItem: item.productItem || null,
+          totalPrice: item.totalPrice || 0,
         };
         return acc;
       }, {});
+      
   
-      setCart(cartItems); // Обновляем состояние корзины
-      setTotalAmount(Number(data.totalAmount) || 0); // Преобразуем totalAmount в число
+      setCart(cartItems);
+      updateTotalPrice(cartItems); // Обновляем totalPrice после загрузки корзины
+  
+      if (typeof data.totalAmount === "number") {
+        setTotalAmount(data.totalAmount);
+      } else {
+        console.warn("totalAmount not found in response:", data);
+      }
+
     } catch (error) {
       console.error("Failed to fetch cart:", error);
       setError("Failed to fetch cart. Please try again later.");
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [updateTotalPrice]);
 
   useEffect(() => {
     fetchCartFromServer();
@@ -135,6 +144,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // Обновляем totalPrice при изменении корзины
+  const handleSetCart = useCallback((newCart: Record<number, CartItem>) => {
+    setCart(newCart);
+    updateTotalPrice(newCart); // Обновляем totalPrice
+  }, [updateTotalPrice]);
 
   const addToCart = useCallback(async (id: number, productItemId?: number) => {
     try {
@@ -183,12 +197,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   
       const data = await response.json();
   
-      // Обновляем состояние корзины
+      // Обновляем состояние корзины после успешного ответа
       setCart((prev) => {
         const updatedCart = { ...prev };
         if (updatedCart[id]) {
           updatedCart[id] = { ...updatedCart[id], count: updatedCart[id].count + 1 };
         }
+  
+        // Пересчитываем totalPrice на основе обновленного состояния корзины
+        updateTotalPrice(updatedCart); // Используем updatedCart вместо cart
+  
         return updatedCart;
       });
   
@@ -200,7 +218,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error("Ошибка при увеличении количества:", error);
       setError("Ошибка при увеличении количества. Пожалуйста, попробуйте позже.");
     }
-  }, [cart, updateTotalAmount]);
+  }, [updateTotalAmount, updateTotalPrice]); // Убедитесь, что зависимости указаны правильно
 
   const decreaseCount = useCallback(async (productId: number, productItemId?: number) => {
     try {
@@ -221,6 +239,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
   
+        // Пересчитываем totalPrice
+        updateTotalPrice(updatedCart); // Добавьте эту строку
+  
         // Пересчитываем totalAmount на основе обновленного корзины
         const totalPrice = calculateTotalPrice(updatedCart);
         const deliveryPrice = 50;
@@ -234,52 +255,59 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error("Failed to decrease count:", error);
       setError("Failed to decrease count. Please try again later.");
     }
-  }, [updateTotalAmount]);
+  }, [updateTotalAmount, updateTotalPrice]); // Добавьте updateTotalPrice в зависимости
   
   const addIngredient = useCallback(async (productId: number, ingredientId: number, productItemId?: number) => {
-  try {
-    const ingredient = allIngredients.find((ing) => ing.id === ingredientId);
-    if (!ingredient) throw new Error("Ingredient not found");
-
-    setCart((prev) => {
-      const updatedCart = { ...prev };
-      const cartItem = updatedCart[productId];
-
-      if (cartItem) {
-        // Проверяем, есть ли уже такой ингредиент
-        const isIngredientExists = cartItem.ingredients?.some((ing) => ing.id === ingredientId);
-        if (!isIngredientExists) {
-          // Если ингредиента нет, добавляем его
-          cartItem.ingredients = [...(cartItem.ingredients || []), ingredient];
-          cartItem.productItem = cartItem.productItem || (productItemId ? { id: productItemId } as ProductItem : undefined);
-
-          // Пересчитываем totalPrice для товара
-          const itemTotalPrice = calculateItemTotalPrice(cartItem);
-          cartItem.totalPrice = itemTotalPrice;
+    try {
+      const ingredient = allIngredients.find((ing) => ing.id === ingredientId);
+      if (!ingredient) throw new Error("Ingredient not found");
+  
+      // Обновляем локальное состояние корзины
+      setCart((prev) => {
+        const updatedCart = { ...prev };
+        const cartItem = updatedCart[productId];
+  
+        if (cartItem) {
+          // Проверяем, есть ли уже такой ингредиент
+          const isIngredientExists = cartItem.ingredients?.some((ing) => ing.id === ingredientId);
+          if (!isIngredientExists) {
+            // Если ингредиента нет, добавляем его
+            cartItem.ingredients = [...(cartItem.ingredients || []), ingredient];
+            cartItem.productItem = cartItem.productItem || (productItemId ? { id: productItemId } as ProductItem : undefined);
+  
+            // Пересчитываем totalPrice для товара
+            const itemTotalPrice = calculateItemTotalPrice(cartItem);
+            cartItem.totalPrice = itemTotalPrice;
+          }
         }
+  
+        // Пересчитываем totalAmount для всей корзины
+        const cartTotalPrice = calculateTotalPrice(updatedCart);
+        const deliveryPrice = 50;
+        const totalAmount = cartTotalPrice + deliveryPrice;
+  
+        // Обновляем totalAmount на сервере
+        updateTotalAmount(totalAmount); // Вызываем updateTotalAmount здесь, внутри setCart
+  
+        return updatedCart;
+      });
+  
+      // Отправляем запрос на добавление ингредиента на сервер
+      const response = await fetch("/api/cart/addIngredient", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId, ingredientId, productItemId, userId: 1, price: ingredient.price }),
+      });
+  
+      if (!response.ok) {
+        throw new Error("Failed to add ingredient on the server");
       }
-
-      // Пересчитываем totalAmount для всей корзины
-      const cartTotalPrice = calculateTotalPrice(updatedCart);
-      const deliveryPrice = 50;
-      const totalAmount = cartTotalPrice + deliveryPrice;
-
-      // Обновляем totalAmount на сервере
-      updateTotalAmount(totalAmount);
-
-      return updatedCart;
-    });
-
-    await fetch("/api/cart/addIngredient", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId, ingredientId, productItemId, userId: 1, price: ingredient.price }),
-    });
-  } catch (error) {
-    console.error("Failed to add ingredient:", error);
-    setError("Failed to add ingredient. Please try again later.");
-  }
-}, [allIngredients]);
+  
+    } catch (error) {
+      console.error("Failed to add ingredient:", error);
+      setError("Failed to add ingredient. Please try again later.");
+    }
+  }, [allIngredients, updateTotalAmount]);
 
   const removeIngredient = useCallback(async (productId: number, ingredientId: number) => {
     try {
@@ -306,7 +334,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <CartContext.Provider
       value={{
         cart,
-        setCart,
+        setCart: handleSetCart,
         addToCart,
         increaseCount,
         decreaseCount,
@@ -317,6 +345,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         allIngredients,
         updateTotalAmount,
         totalAmount,
+        totalPrice, // Передаем totalPrice
+        deliveryPrice, // Передаем deliveryPrice
+        discount, // Передаем discount
+        freeShipping, // Передаем freeShipping
       }}
     >
       {children}

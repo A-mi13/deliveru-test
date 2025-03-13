@@ -5,20 +5,19 @@ import { calculateTotalPrice } from "@/components/shared/priceCalculator";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const userId = Number(searchParams.get("userId")) || 1;
-  const deliveryPrice = 50; // Пример стоимости доставки
+  const deliveryPrice = 50;
 
   try {
-    // Получаем корзину пользователя
     const cart = await prisma.cart.findUnique({
       where: { userId },
       include: {
         items: {
           include: {
             productItem: {
-              include: { product: { include: { items: true } } }, // Включаем вариации продукта
+              include: { product: { include: { items: true } } },
             },
             ingredients: {
-              include: { ingredient: true }, // Включаем ингредиенты
+              include: { ingredient: true },
             },
           },
         },
@@ -29,19 +28,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ items: [], totalAmount: 0 });
     }
 
-    // Формируем ответ для клиента
     const items = cart.items.map((item) => ({
       id: item.id,
       count: item.quantity,
       product: {
-        id: item.productItem.product.id,
-        name: item.productItem.product.name,
-        price: item.productItem.price, // Цена вариации
-        imageUrl: item.productItem.product.imageUrl,
-        categoryId: item.productItem.product.categoryId,
-        items: item.productItem.product.items, // Включаем вариации
+        id: item.productItem?.product.id || 0,
+        name: item.productItem?.product.name || "",
+        price: item.productItem?.price || 0,
+        imageUrl: item.productItem?.product.imageUrl || "",
+        categoryId: item.productItem?.product.categoryId || 0,
+        items: item.productItem?.product.items || [],
       },
-      productItem: item.productItem, // Включаем productItem
+      productItem: item.productItem || null,
       ingredients: item.ingredients.map((ing) => ({
         id: ing.ingredient.id,
         name: ing.ingredient.name,
@@ -50,11 +48,10 @@ export async function GET(request: Request) {
       })),
     }));
 
-    // Рассчитываем общую стоимость товаров с учетом ингредиентов и вариаций
     const totalPrice = calculateTotalPrice({
       items: cart.items.map((item) => ({
-        productItem: item.productItem,
-        product: item.productItem.product,
+        productItem: item.productItem || null,
+        product: item.productItem?.product || null,
         ingredients: item.ingredients.map((ing) => ({
           price: ing.ingredient.price,
         })),
@@ -62,10 +59,8 @@ export async function GET(request: Request) {
       })),
     });
 
-    // Добавляем стоимость доставки к итоговой сумме
     const totalAmount = totalPrice + deliveryPrice;
 
-    // Обновляем поле totalAmount в корзине
     await prisma.cart.update({
       where: { id: cart.id },
       data: { totalAmount },

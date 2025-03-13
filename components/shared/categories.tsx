@@ -41,6 +41,7 @@ export const Categories: React.FC<Props> = ({ className }) => {
   const [selectedProduct, setSelectedProduct] = useState<ProductWithItems | null>(null);
   const [isComboModalOpen, setIsComboModalOpen] = useState(false);
   const { cart, addToCart, increaseCount, decreaseCount } = useCart();
+  
 
   useEffect(() => {
     const fetchData = async () => {

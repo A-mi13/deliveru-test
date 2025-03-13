@@ -16,7 +16,7 @@ const sizeMapping: { [key: number]: string } = {
 };
 
 const getSizeLabel = (size: number | null) => {
-  return size !== null && sizeMapping[size] ? sizeMapping[size] : "Неизвестный размер";
+  return size !== null && sizeMapping[size] ? sizeMapping[size] : null;
 };
 
 interface ProductItem {
@@ -88,6 +88,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
   const selectedProductItem = product.items?.find((item) => item.id === selectedSize);
   const priceToDisplay = selectedProductItem?.price || product.price; // Если вариация не выбрана, показываем цену продукта
 
+  const items = Array.isArray(product.items) ? product.items : [];
+
   const toggleFavorite = () => {
     if (isFavorite) {
       removeFromFavorites(product.id);
@@ -131,9 +133,8 @@ const ProductModal: React.FC<ProductModalProps> = ({
   return (
     <div className="fixed inset-0 flex items-end justify-center bg-black bg-opacity-50 z-50">
       <div
-        className={`bg-white max-w-[430px] w-full ${
-          isFullScreen ? "h-[100%]" : "h-[70%]"
-        } rounded-t-lg p-4 relative overflow-y-auto no-scrollbar transition-all duration-300`}
+        className={`bg-white max-w-[430px] w-full ${isFullScreen ? "h-[100%]" : "h-[70%]"
+          } rounded-t-lg p-4 relative overflow-y-auto no-scrollbar transition-all duration-300`}
       >
         {/* Ползунок для изменения высоты */}
         <div
@@ -178,25 +179,26 @@ const ProductModal: React.FC<ProductModalProps> = ({
         {product.price && <p className="text-lg mt-1">{product.price}₽</p>}
         <p className="mt-2">Описание товара...</p>
         {/* Выбор размера через кнопки */}
-        {product.items && product.items.length > 0 && (
+        {items.length > 0 ? (
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">Размер</label>
             <div className="flex gap-2 justify-center">
-              {product.items.map((item) => (
-                <button
-                  key={item.id}
-                  className={`bg-[#70B9BE] text-white px-4 py-2 rounded-full transition-colors ${
-                    selectedSize === item.id ? "opacity-100" : "opacity-70 hover:opacity-100"
-                  }`}
-                  onClick={() => setSelectedSize(item.id)}
-                >
-                  {/* Отображаем текстовое описание размера */}
-                  {getSizeLabel(item.size)}
-                </button>
-              ))}
+              {items
+                .filter((item) => getSizeLabel(item.size) !== null) // Фильтруем элементы с неизвестным размером
+                .map((item) => (
+                  <button
+                    key={item.id}
+                    className={`bg-[#70B9BE] text-white px-4 py-2 rounded-full transition-colors ${
+                      selectedSize === item.id ? "opacity-100" : "opacity-70 hover:opacity-100"
+                    }`}
+                    onClick={() => setSelectedSize(item.id)}
+                  >
+                    {getSizeLabel(item.size)}
+                  </button>
+                ))}
             </div>
           </div>
-        )}
+        ) : null}
         {/* Ингредиенты */}
         {product.categoryId !== 3 && (
           <div className="pb-20">
