@@ -75,7 +75,7 @@ const DeliveryMethodSelection: React.FC<{ onSelect: (method: string) => void }> 
   const finalPrice = totalPrice + (freeShipping ? 0 : deliveryPrice) - discount;
 
   return (
-    <div className="p-4 max-w-md mx-auto">
+    <div className="max-w-md mx-auto">
       <h2 className="text-xl font-semibold mb-4">Способ получения</h2>
 
       {/* Переключение метода доставки */}
